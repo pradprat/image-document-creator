@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { defaultQuad, orderQuad, outputSize } from './scanner-core.mjs';
+import { defaultQuad, imageFiles, orderQuad, outputSize } from './scanner-core.mjs';
 
 test('orderQuad returns corners in TL, TR, BR, BL order', () => {
   const corners = orderQuad([
@@ -31,4 +31,14 @@ test('outputSize creates an A4-proportioned portrait output', () => {
   const { width, height } = outputSize(900, 1200);
   assert.equal(width, 1200);
   assert.equal(height, 1697);
+});
+
+test('imageFiles keeps all image selections in their original order', () => {
+  const selected = imageFiles([
+    { name: 'page-1.jpg', type: 'image/jpeg' },
+    { name: 'notes.txt', type: 'text/plain' },
+    { name: 'page-2.png', type: 'image/png' },
+  ]);
+
+  assert.deepEqual(selected.map((file) => file.name), ['page-1.jpg', 'page-2.png']);
 });

@@ -23,6 +23,10 @@ export function defaultQuad(width, height, inset = 0.06) {
   ];
 }
 
+export function imageFiles(files) {
+  return Array.from(files || []).filter((file) => file?.type?.startsWith('image/'));
+}
+
 export function outputSize(sourceWidth, sourceHeight) {
   const width = 1200;
   const height = Math.round(width * Math.SQRT2);

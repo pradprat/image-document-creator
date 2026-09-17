@@ -67,11 +67,11 @@
     </header>
     <section class="app" aria-label="Document scanner">
       <div class="workspace">
-        <div class="step"><b>1</b> Choose a photo &nbsp; <span aria-hidden="true">/</span> &nbsp; <b>2</b> Refine corners &nbsp; <span aria-hidden="true">/</span> &nbsp; <b>3</b> Export PDF</div>
+        <div class="step"><b>1</b> Choose photos &nbsp; <span aria-hidden="true">/</span> &nbsp; <b>2</b> Refine corners &nbsp; <span aria-hidden="true">/</span> &nbsp; <b>3</b> Export PDF</div>
         <label class="dropzone" id="dropzone" tabindex="0" for="file-input">
-          <div class="drop-copy"><div class="mark" aria-hidden="true"></div><h2>Drop a document photo</h2><p>The page is detected automatically. Drag any corner if it needs adjustment.</p><span class="btn primary">Choose image</span><p class="hint">JPG, PNG, or HEIC converted by your device</p></div>
+          <div class="drop-copy"><div class="mark" aria-hidden="true"></div><h2>Drop document photos</h2><p>Select several photos at once. The page is detected automatically, then you can refine each crop.</p><span class="btn primary">Choose images</span><p class="hint">JPG, PNG, or HEIC converted by your device</p></div>
         </label>
-        <input id="file-input" type="file" accept="image/*" hidden>
+        <input id="file-input" type="file" accept="image/*" multiple hidden>
         <div class="editor" id="editor">
           <p class="instruction"><b>Refine the crop.</b> Drag the four gold points to the paper corners, then add the cleaned page to your PDF.</p>
           <div class="canvas-wrap"><canvas id="preview" aria-label="Document crop editor"></canvas></div>
@@ -104,10 +104,10 @@
   </script>
   <script async src="./vendor/opencv.js" onload="window.opencvScriptLoaded()" onerror="window.opencvScriptFailed()"></script>
   <script type="module">
-    import { clampPoint, defaultQuad, orderQuad, outputSize } from './scanner-core.mjs';
+    import { clampPoint, defaultQuad, imageFiles, orderQuad, outputSize } from './scanner-core.mjs';
 
     const $ = (id) => document.getElementById(id);
-    const state = { image:null, corners:[], pages:[], active:null, cv:false, rendering:false };
+    const state = { image:null, corners:[], pages:[], pending:[], active:null, cv:false, rendering:false };
     const input = $('file-input'), dropzone = $('dropzone'), editor = $('editor'), canvas = $('preview'), ctx = canvas.getContext('2d');
     const status = $('status'), add = $('add-btn'), download = $('download-btn');
 
@@ -127,8 +127,21 @@
     function closestCorner(point) { let result={ index:0, distance:Infinity }; state.corners.forEach((p,i)=>{ const d=Math.hypot(point.x-p.x,point.y-p.y); if(d<result.distance) result={index:i,distance:d}; }); return result; }
     function resetImage(message) { state.image=null; state.corners=[]; state.active=null; input.value=''; setEditor(false); setStatus(message || (state.cv ? 'Ready for another photo.' : 'Loading scanner…')); }
     function loadFile(file) {
-      if (!file) return; if (!file.type.startsWith('image/')) { setStatus('Please choose an image file.', true); return; }
-      const reader = new FileReader(); reader.onload = () => { const image = new Image(); image.onload = () => { state.image=image; state.corners=defaultQuad(image.width,image.height,.055); setEditor(true); render(); setStatus(state.cv ? 'Photo ready. Detecting paper edges…' : 'Photo ready. Drag corners while the scanner loads.'); if (state.cv) autoDetect(); }; image.src=reader.result; }; reader.readAsDataURL(file);
+      if (!file) return; const reader = new FileReader(); reader.onload = () => { const image = new Image(); image.onload = () => { state.image=image; state.corners=defaultQuad(image.width,image.height,.055); setEditor(true); render(); setStatus(state.cv ? 'Photo ready. Detecting paper edges…' : 'Photo ready. Drag corners while the scanner loads.'); if (state.cv) autoDetect(); }; image.src=reader.result; }; reader.readAsDataURL(file);
+    }
+    function startNextFile() {
+      const file = state.pending.shift();
+      if (!file) return false;
+      state.image=null; state.corners=[]; state.active=null; input.value=''; setEditor(false);
+      loadFile(file);
+      return true;
+    }
+    function queueFiles(files) {
+      const selected = imageFiles(files);
+      if (!selected.length) { setStatus('Please choose one or more image files.', true); return; }
+      state.pending = selected;
+      input.value = '';
+      startNextFile();
     }
     function autoDetect() {
       if (!state.image || !state.cv) return; setStatus('Finding the document edges…');
@@ -146,13 +159,13 @@
       finally { [src,dst,M,srcTri,dstTri].forEach(m=>m&&m.delete()); }
     }
     function renderQueue() { const queue=$('queue'); queue.innerHTML=''; if(!state.pages.length) queue.innerHTML='<li class="empty">No pages yet</li>'; state.pages.forEach((page,i)=>{ const li=document.createElement('li'); li.innerHTML=`<img src="${page}" alt="Cleaned page ${i+1}"><span>Page ${i+1}<br><small>cleaned & ready</small></span>`; queue.append(li); }); download.disabled=!state.pages.length; }
-    input.addEventListener('change', e=>loadFile(e.target.files[0]));
-    ['dragenter','dragover'].forEach(event=>dropzone.addEventListener(event,e=>{e.preventDefault();dropzone.classList.add('drag');})); ['dragleave','drop'].forEach(event=>dropzone.addEventListener(event,e=>{e.preventDefault();dropzone.classList.remove('drag');})); dropzone.addEventListener('drop',e=>loadFile(e.dataTransfer.files[0]));
+    input.addEventListener('change', e=>queueFiles(e.target.files));
+    ['dragenter','dragover'].forEach(event=>dropzone.addEventListener(event,e=>{e.preventDefault();dropzone.classList.add('drag');})); ['dragleave','drop'].forEach(event=>dropzone.addEventListener(event,e=>{e.preventDefault();dropzone.classList.remove('drag');})); dropzone.addEventListener('drop',e=>queueFiles(e.dataTransfer.files));
     canvas.addEventListener('pointerdown',e=>{const hit=closestCorner(pointerToImage(e)); if(hit.distance<90) { state.active=hit.index; canvas.setPointerCapture(e.pointerId); }}); canvas.addEventListener('pointermove',e=>{if(state.active===null)return; state.corners[state.active]=clampPoint(pointerToImage(e),state.image.width,state.image.height); render();}); canvas.addEventListener('pointerup',e=>{state.active=null; canvas.releasePointerCapture?.(e.pointerId);});
-    $('auto-btn').addEventListener('click',autoDetect); $('new-btn').addEventListener('click',resetImage);
-    add.addEventListener('click',()=>{ try { add.disabled=true; setStatus('Cleaning page…'); const page=cropPage(); state.pages.push(page); renderQueue(); resetImage(`Page ${state.pages.length} added to the PDF.`); } catch(error) { console.error(error); setStatus(error.message || 'Could not clean this page.', true); } finally { add.disabled=false; }});
+    $('auto-btn').addEventListener('click',autoDetect); $('new-btn').addEventListener('click',()=>{state.pending=[]; resetImage('Choose one or more document photos.');});
+    add.addEventListener('click',()=>{ try { add.disabled=true; setStatus('Cleaning page…'); const page=cropPage(); state.pages.push(page); renderQueue(); if (startNextFile()) setStatus(`Page ${state.pages.length} added. Opening the next photo…`); else resetImage(`Page ${state.pages.length} added to the PDF.`); } catch(error) { console.error(error); setStatus(error.message || 'Could not clean this page.', true); } finally { add.disabled=false; }});
     download.addEventListener('click',()=>{ try { if(!window.jspdf) throw new Error('PDF generator did not load. Check your internet connection and try again.'); const { jsPDF }=window.jspdf; const pdf=new jsPDF({orientation:'portrait',unit:'px',format:[1200,1697],compress:true}); state.pages.forEach((page,i)=>{if(i)pdf.addPage([1200,1697],'portrait'); pdf.addImage(page,'JPEG',0,0,1200,1697,undefined,'FAST');}); let name=$('filename').value.trim()||'scanned-document.pdf'; if(!name.toLowerCase().endsWith('.pdf')) name += '.pdf'; pdf.save(name); setStatus(`${state.pages.length}-page PDF downloaded.`); } catch(error) { console.error(error); setStatus(error.message || 'Could not create PDF.',true); }});
-    window.cvReady.then(()=>{state.cv=true; setStatus('Scanner ready. Choose a document photo.'); if(state.image)autoDetect();}).catch(()=>setStatus('Scanner could not load. Please refresh and check your internet connection.',true));
+    window.cvReady.then(()=>{state.cv=true; setStatus('Scanner ready. Choose one or more document photos.'); if(state.image)autoDetect();}).catch(()=>setStatus('Scanner could not load. Please refresh and check your internet connection.',true));
   </script>
 </body>
 </html>
