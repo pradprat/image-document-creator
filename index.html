@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="theme-color" content="#173229" />
+  <title>Scan to PDF</title>
+  <style>
+    :root { --ink:#173229; --muted:#68756f; --paper:#fffdf8; --canvas:#e9e6dd; --line:#d6d9d1; --green:#17694c; --green-dark:#0e4a35; --gold:#d6a73d; --danger:#b63c2e; }
+    * { box-sizing:border-box; }
+    body { margin:0; min-height:100vh; color:var(--ink); background:linear-gradient(145deg,#f4f2eb 0%,#e4ede3 100%); font:16px/1.45 Georgia, 'Times New Roman', serif; }
+    button, input { font:inherit; }
+    .shell { max-width:1160px; margin:auto; padding:32px 20px 48px; }
+    header { display:flex; justify-content:space-between; align-items:end; gap:20px; margin-bottom:26px; }
+    .eyebrow { font:600 12px/1.2 Arial,sans-serif; letter-spacing:.14em; text-transform:uppercase; color:var(--green); margin:0 0 9px; }
+    h1 { margin:0; font-size:clamp(32px,5vw,54px); font-weight:500; letter-spacing:-.045em; line-height:.97; }
+    .privacy { max-width:235px; margin:0; color:var(--muted); font-size:14px; text-align:right; }
+    .app { display:grid; grid-template-columns:minmax(0,1fr) 318px; border:1px solid rgba(23,50,41,.17); box-shadow:0 22px 55px rgba(28,53,42,.14); background:rgba(255,253,248,.8); }
+    .workspace { min-height:630px; padding:26px; border-right:1px solid var(--line); }
+    .sidebar { padding:26px; background:#f7f6f0; }
+    .step { display:flex; gap:12px; align-items:center; margin-bottom:20px; color:var(--muted); font:600 12px/1.2 Arial,sans-serif; letter-spacing:.08em; text-transform:uppercase; }
+    .step b { display:grid; place-items:center; width:25px; height:25px; border:1px solid var(--green); border-radius:50%; color:var(--green); font-size:12px; }
+    .dropzone { display:grid; place-items:center; min-height:480px; border:1.5px dashed #aab8ae; background:#f1f1eb; cursor:pointer; transition:.2s ease; position:relative; overflow:hidden; }
+    .dropzone:hover, .dropzone.drag { background:#e8f0e8; border-color:var(--green); }
+    .drop-copy { max-width:360px; text-align:center; padding:36px; }
+    .drop-copy .mark { width:48px; height:58px; margin:0 auto 18px; border:2px solid var(--green); border-radius:2px; position:relative; }
+    .drop-copy .mark:after { content:''; position:absolute; width:15px; border-top:2px solid var(--green); right:-2px; top:13px; transform:rotate(45deg); transform-origin:right; }
+    .drop-copy h2 { margin:0 0 8px; font-size:28px; font-weight:500; letter-spacing:-.03em; }
+    .drop-copy p { color:var(--muted); margin:0 0 19px; }
+    .hint { font:12px Arial,sans-serif; color:var(--muted); margin:13px 0 0; }
+    .btn { appearance:none; border:0; min-height:45px; padding:0 16px; cursor:pointer; font:600 14px/1 Arial,sans-serif; letter-spacing:.01em; transition:transform .15s,background .15s,opacity .15s; }
+    .btn:hover:not(:disabled) { transform:translateY(-1px); }
+    .btn:focus-visible, .dropzone:focus-visible { outline:3px solid rgba(214,167,61,.6); outline-offset:3px; }
+    .btn.primary { color:#fff; background:var(--green); }
+    .btn.primary:hover:not(:disabled) { background:var(--green-dark); }
+    .btn.secondary { color:var(--green); background:transparent; border:1px solid #a9b8ad; }
+    .btn:disabled { cursor:not-allowed; opacity:.42; }
+    .editor { display:none; }
+    .editor.visible { display:block; }
+    .canvas-wrap { display:grid; place-items:center; min-height:470px; background:#1f2925; overflow:hidden; }
+    #preview { max-width:100%; max-height:500px; touch-action:none; display:block; }
+    .tools { display:flex; flex-wrap:wrap; gap:10px; justify-content:space-between; padding-top:14px; }
+    .tools .right { display:flex; flex-wrap:wrap; gap:10px; }
+    .instruction { margin:0 0 16px; font-size:17px; }
+    .instruction b { color:var(--green); }
+    .side-title { margin:0; font-size:23px; font-weight:500; letter-spacing:-.025em; }
+    .side-sub { margin:5px 0 20px; color:var(--muted); font-size:14px; }
+    .queue { list-style:none; padding:0; margin:0; display:grid; gap:10px; }
+    .queue li { display:flex; align-items:center; gap:11px; min-height:70px; padding:7px; border:1px solid var(--line); background:var(--paper); }
+    .queue img { width:42px; height:56px; object-fit:cover; border:1px solid #d0d1c9; }
+    .queue span { font:600 14px/1.25 Arial,sans-serif; }
+    .empty { display:block; padding:15px; border:1px dashed #c6cbc4; color:var(--muted); font:14px Arial,sans-serif; text-align:center; }
+    .download { margin-top:22px; padding-top:20px; border-top:1px solid var(--line); }
+    .filename { width:100%; min-height:42px; margin:0 0 10px; padding:0 11px; border:1px solid #b8c0b8; border-radius:0; background:#fff; color:var(--ink); font:14px Arial,sans-serif; }
+    .status { min-height:20px; margin:14px 0 0; color:var(--muted); font:13px Arial,sans-serif; }
+    .status.error { color:var(--danger); }
+    .footnote { margin:22px 0 0; color:var(--muted); font-size:13px; }
+    @media (max-width:800px) { .shell { padding:22px 14px 30px; } header { align-items:start; flex-direction:column; } .privacy { text-align:left; } .app { grid-template-columns:1fr; } .workspace { border-right:0; border-bottom:1px solid var(--line); min-height:520px; padding:18px; } .sidebar { padding:20px 18px; } .dropzone { min-height:410px; } .canvas-wrap { min-height:360px; } }
+    @media (prefers-reduced-motion:reduce) { *,*:before,*:after { transition:none!important; } }
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <header>
+      <div><p class="eyebrow">Document utility</p><h1>Scan a document.<br>Keep only the page.</h1></div>
+      <p class="privacy">Your images are processed in this browser. Nothing is uploaded to a server.</p>
+    </header>
+    <section class="app" aria-label="Document scanner">
+      <div class="workspace">
+        <div class="step"><b>1</b> Choose a photo &nbsp; <span aria-hidden="true">/</span> &nbsp; <b>2</b> Refine corners &nbsp; <span aria-hidden="true">/</span> &nbsp; <b>3</b> Export PDF</div>
+        <label class="dropzone" id="dropzone" tabindex="0" for="file-input">
+          <div class="drop-copy"><div class="mark" aria-hidden="true"></div><h2>Drop a document photo</h2><p>The page is detected automatically. Drag any corner if it needs adjustment.</p><span class="btn primary">Choose image</span><p class="hint">JPG, PNG, or HEIC converted by your device</p></div>
+        </label>
+        <input id="file-input" type="file" accept="image/*" hidden>
+        <div class="editor" id="editor">
+          <p class="instruction"><b>Refine the crop.</b> Drag the four gold points to the paper corners, then add the cleaned page to your PDF.</p>
+          <div class="canvas-wrap"><canvas id="preview" aria-label="Document crop editor"></canvas></div>
+          <div class="tools"><button class="btn secondary" id="auto-btn" type="button">Auto-detect again</button><div class="right"><button class="btn secondary" id="new-btn" type="button">Choose another image</button><button class="btn primary" id="add-btn" type="button">Add cleaned page</button></div></div>
+        </div>
+      </div>
+      <aside class="sidebar">
+        <h2 class="side-title">PDF pages</h2><p class="side-sub">Add one or more scanned pages.</p>
+        <ol class="queue" id="queue"><li class="empty">No pages yet</li></ol>
+        <div class="download"><label class="eyebrow" for="filename">File name</label><input class="filename" id="filename" value="scanned-document.pdf" maxlength="80"><button class="btn primary" id="download-btn" type="button" disabled>Download PDF</button><p class="status" id="status" role="status">Loading scanner…</p></div>
+        <p class="footnote">Tip: use clear photos with all four paper edges visible for the best automatic crop.</p>
+      </aside>
+    </section>
+  </main>
+  <script src="./vendor/jspdf.umd.min.js"></script>
+  <script>
+    window.cvReady = new Promise((resolve, reject) => {
+      window.opencvScriptLoaded = () => {
+        const runtime = window.cv;
+        if (runtime && typeof runtime.then === 'function') {
+          runtime.then((readyCv) => { window.cv = readyCv; resolve(readyCv); }).catch(reject);
+        } else if (runtime && typeof runtime.Mat === 'function') {
+          resolve(runtime);
+        } else {
+          reject(new Error('OpenCV did not initialize.'));
+        }
+      };
+      window.opencvScriptFailed = () => reject(new Error('OpenCV script could not load.'));
+    });
+  </script>
+  <script async src="./vendor/opencv.js" onload="window.opencvScriptLoaded()" onerror="window.opencvScriptFailed()"></script>
+  <script type="module">
+    import { clampPoint, defaultQuad, orderQuad, outputSize } from './scanner-core.mjs';
+
+    const $ = (id) => document.getElementById(id);
+    const state = { image:null, corners:[], pages:[], active:null, cv:false, rendering:false };
+    const input = $('file-input'), dropzone = $('dropzone'), editor = $('editor'), canvas = $('preview'), ctx = canvas.getContext('2d');
+    const status = $('status'), add = $('add-btn'), download = $('download-btn');
+
+    function setStatus(message, error = false) { status.textContent = message; status.className = `status${error ? ' error' : ''}`; }
+    function setEditor(open) { editor.classList.toggle('visible', open); dropzone.style.display = open ? 'none' : 'grid'; }
+    function displayScale() { return Math.min(760 / state.image.width, 500 / state.image.height, 1); }
+    function render() {
+      if (!state.image) return;
+      const scale = displayScale(); canvas.width = Math.round(state.image.width * scale); canvas.height = Math.round(state.image.height * scale);
+      ctx.drawImage(state.image, 0, 0, canvas.width, canvas.height);
+      const p = state.corners.map(c => ({ x:c.x * scale, y:c.y * scale }));
+      ctx.save(); ctx.fillStyle='rgba(0,0,0,.38)'; ctx.fillRect(0,0,canvas.width,canvas.height);
+      ctx.globalCompositeOperation='destination-out'; ctx.beginPath(); ctx.moveTo(p[0].x,p[0].y); p.slice(1).forEach(q => ctx.lineTo(q.x,q.y)); ctx.closePath(); ctx.fill(); ctx.restore();
+      ctx.save(); ctx.strokeStyle='#e7bc4d'; ctx.lineWidth=3; ctx.beginPath(); ctx.moveTo(p[0].x,p[0].y); p.slice(1).forEach(q => ctx.lineTo(q.x,q.y)); ctx.closePath(); ctx.stroke(); p.forEach((q,i) => { ctx.fillStyle='#f4c84d'; ctx.beginPath(); ctx.arc(q.x,q.y,11,0,Math.PI*2); ctx.fill(); ctx.fillStyle='#173229'; ctx.font='bold 12px Arial'; ctx.textAlign='center'; ctx.textBaseline='middle'; ctx.fillText(String(i+1),q.x,q.y+1); }); ctx.restore();
+    }
+    function pointerToImage(event) { const r = canvas.getBoundingClientRect(), scale = displayScale(); return { x:(event.clientX-r.left) * canvas.width/r.width/scale, y:(event.clientY-r.top) * canvas.height/r.height/scale }; }
+    function closestCorner(point) { let result={ index:0, distance:Infinity }; state.corners.forEach((p,i)=>{ const d=Math.hypot(point.x-p.x,point.y-p.y); if(d<result.distance) result={index:i,distance:d}; }); return result; }
+    function resetImage(message) { state.image=null; state.corners=[]; state.active=null; input.value=''; setEditor(false); setStatus(message || (state.cv ? 'Ready for another photo.' : 'Loading scanner…')); }
+    function loadFile(file) {
+      if (!file) return; if (!file.type.startsWith('image/')) { setStatus('Please choose an image file.', true); return; }
+      const reader = new FileReader(); reader.onload = () => { const image = new Image(); image.onload = () => { state.image=image; state.corners=defaultQuad(image.width,image.height,.055); setEditor(true); render(); setStatus(state.cv ? 'Photo ready. Detecting paper edges…' : 'Photo ready. Drag corners while the scanner loads.'); if (state.cv) autoDetect(); }; image.src=reader.result; }; reader.readAsDataURL(file);
+    }
+    function autoDetect() {
+      if (!state.image || !state.cv) return; setStatus('Finding the document edges…');
+      let src, gray, edges, contours, hierarchy;
+      try { src=cv.imread(state.image); gray=new cv.Mat(); edges=new cv.Mat(); cv.cvtColor(src,gray,cv.COLOR_RGBA2GRAY); cv.GaussianBlur(gray,gray,new cv.Size(5,5),0); cv.Canny(gray,edges,60,180); contours=new cv.MatVector(); hierarchy=new cv.Mat(); cv.findContours(edges,contours,hierarchy,cv.RETR_LIST,cv.CHAIN_APPROX_SIMPLE); let best=null, bestArea=0;
+        for(let i=0;i<contours.size();i++){ const contour=contours.get(i), peri=cv.arcLength(contour,true), approx=new cv.Mat(); cv.approxPolyDP(contour,approx,.02*peri,true); const area=Math.abs(cv.contourArea(approx)); if(approx.rows===4 && area>bestArea && area>src.rows*src.cols*.12){ bestArea=area; best=[]; for(let j=0;j<4;j++) best.push({x:approx.intAt(j,0),y:approx.intAt(j,1)}); } contour.delete(); approx.delete(); }
+        if(best) { state.corners=orderQuad(best).map(p=>clampPoint(p,state.image.width,state.image.height)); render(); setStatus('Paper edges detected. Adjust the gold points if needed.'); } else setStatus('Set the four gold points on the document corners.');
+      } catch (error) { console.error(error); setStatus('Auto-detection could not find the page. Set the four points manually.'); }
+      finally { [src,gray,edges,contours,hierarchy].forEach(m=>m&&m.delete()); }
+    }
+    function cropPage() {
+      if (!state.cv) throw new Error('The scanner is still loading. Please wait a moment.');
+      let src, dst, M, srcTri, dstTri;
+      try { src=cv.imread(state.image); const {width,height}=outputSize(state.image.width,state.image.height); srcTri=cv.matFromArray(4,1,cv.CV_32FC2,state.corners.flatMap(p=>[p.x,p.y])); dstTri=cv.matFromArray(4,1,cv.CV_32FC2,[0,0,width-1,0,width-1,height-1,0,height-1]); M=cv.getPerspectiveTransform(srcTri,dstTri); dst=new cv.Mat(); cv.warpPerspective(src,dst,M,new cv.Size(width,height),cv.INTER_CUBIC,cv.BORDER_REPLICATE,new cv.Scalar()); const out=document.createElement('canvas'); cv.imshow(out,dst); return out.toDataURL('image/jpeg',.93); }
+      finally { [src,dst,M,srcTri,dstTri].forEach(m=>m&&m.delete()); }
+    }
+    function renderQueue() { const queue=$('queue'); queue.innerHTML=''; if(!state.pages.length) queue.innerHTML='<li class="empty">No pages yet</li>'; state.pages.forEach((page,i)=>{ const li=document.createElement('li'); li.innerHTML=`<img src="${page}" alt="Cleaned page ${i+1}"><span>Page ${i+1}<br><small>cleaned & ready</small></span>`; queue.append(li); }); download.disabled=!state.pages.length; }
+    input.addEventListener('change', e=>loadFile(e.target.files[0]));
+    ['dragenter','dragover'].forEach(event=>dropzone.addEventListener(event,e=>{e.preventDefault();dropzone.classList.add('drag');})); ['dragleave','drop'].forEach(event=>dropzone.addEventListener(event,e=>{e.preventDefault();dropzone.classList.remove('drag');})); dropzone.addEventListener('drop',e=>loadFile(e.dataTransfer.files[0]));
+    canvas.addEventListener('pointerdown',e=>{const hit=closestCorner(pointerToImage(e)); if(hit.distance<90) { state.active=hit.index; canvas.setPointerCapture(e.pointerId); }}); canvas.addEventListener('pointermove',e=>{if(state.active===null)return; state.corners[state.active]=clampPoint(pointerToImage(e),state.image.width,state.image.height); render();}); canvas.addEventListener('pointerup',e=>{state.active=null; canvas.releasePointerCapture?.(e.pointerId);});
+    $('auto-btn').addEventListener('click',autoDetect); $('new-btn').addEventListener('click',resetImage);
+    add.addEventListener('click',()=>{ try { add.disabled=true; setStatus('Cleaning page…'); const page=cropPage(); state.pages.push(page); renderQueue(); resetImage(`Page ${state.pages.length} added to the PDF.`); } catch(error) { console.error(error); setStatus(error.message || 'Could not clean this page.', true); } finally { add.disabled=false; }});
+    download.addEventListener('click',()=>{ try { if(!window.jspdf) throw new Error('PDF generator did not load. Check your internet connection and try again.'); const { jsPDF }=window.jspdf; const pdf=new jsPDF({orientation:'portrait',unit:'px',format:[1200,1697],compress:true}); state.pages.forEach((page,i)=>{if(i)pdf.addPage([1200,1697],'portrait'); pdf.addImage(page,'JPEG',0,0,1200,1697,undefined,'FAST');}); let name=$('filename').value.trim()||'scanned-document.pdf'; if(!name.toLowerCase().endsWith('.pdf')) name += '.pdf'; pdf.save(name); setStatus(`${state.pages.length}-page PDF downloaded.`); } catch(error) { console.error(error); setStatus(error.message || 'Could not create PDF.',true); }});
+    window.cvReady.then(()=>{state.cv=true; setStatus('Scanner ready. Choose a document photo.'); if(state.image)autoDetect();}).catch(()=>setStatus('Scanner could not load. Please refresh and check your internet connection.',true));
+  </script>
+</body>
+</html>
