@@ -46,9 +46,12 @@
     .side-title { margin:0; font-size:23px; font-weight:500; letter-spacing:-.025em; }
     .side-sub { margin:5px 0 20px; color:var(--muted); font-size:14px; }
     .queue { list-style:none; padding:0; margin:0; display:grid; gap:10px; }
-    .queue li { display:flex; align-items:center; gap:11px; min-height:70px; padding:7px; border:1px solid var(--line); background:var(--paper); }
+    .queue li { display:grid; grid-template-columns:42px minmax(0,1fr) auto; align-items:center; gap:11px; min-height:70px; padding:7px; border:1px solid var(--line); background:var(--paper); }
     .queue img { width:42px; height:56px; object-fit:cover; border:1px solid #d0d1c9; }
     .queue span { font:600 14px/1.25 Arial,sans-serif; }
+    .queue small { color:var(--muted); font:12px Arial,sans-serif; font-weight:400; }
+    .edit-page { min-height:32px; padding:0 8px; color:var(--green); border:1px solid #a9b8ad; background:transparent; cursor:pointer; font:600 12px Arial,sans-serif; }
+    .edit-page:hover { background:#e7efe8; }
     .empty { display:block; padding:15px; border:1px dashed #c6cbc4; color:var(--muted); font:14px Arial,sans-serif; text-align:center; }
     .download { margin-top:22px; padding-top:20px; border-top:1px solid var(--line); }
     .filename { width:100%; min-height:42px; margin:0 0 10px; padding:0 11px; border:1px solid #b8c0b8; border-radius:0; background:#fff; color:var(--ink); font:14px Arial,sans-serif; }
@@ -79,7 +82,7 @@
         </div>
       </div>
       <aside class="sidebar">
-        <h2 class="side-title">PDF pages</h2><p class="side-sub">Add one or more scanned pages.</p>
+        <h2 class="side-title">PDF pages</h2><p class="side-sub" id="page-count">0 pages selected · 0 ready</p>
         <ol class="queue" id="queue"><li class="empty">No pages yet</li></ol>
         <div class="download"><label class="eyebrow" for="filename">File name</label><input class="filename" id="filename" value="scanned-document.pdf" maxlength="80"><button class="btn primary" id="download-btn" type="button" disabled>Download PDF</button><p class="status" id="status" role="status">Loading scanner…</p></div>
         <p class="footnote">Tip: use clear photos with all four paper edges visible for the best automatic crop.</p>
@@ -104,12 +107,12 @@
   </script>
   <script async src="./vendor/opencv.js" onload="window.opencvScriptLoaded()" onerror="window.opencvScriptFailed()"></script>
   <script type="module">
-    import { clampPoint, defaultQuad, imageFiles, orderQuad, outputSize } from './scanner-core.mjs';
+    import { clampPoint, defaultQuad, imageFiles, orderQuad, outputSize, uploadProgress } from './scanner-core.mjs';
 
     const $ = (id) => document.getElementById(id);
-    const state = { image:null, corners:[], pages:[], pending:[], active:null, cv:false, rendering:false };
+    const state = { image:null, corners:[], pages:[], pending:[], selected:0, batchReady:0, editingPage:null, active:null, cv:false, rendering:false };
     const input = $('file-input'), dropzone = $('dropzone'), editor = $('editor'), canvas = $('preview'), ctx = canvas.getContext('2d');
-    const status = $('status'), add = $('add-btn'), download = $('download-btn');
+    const status = $('status'), add = $('add-btn'), download = $('download-btn'), pageCount = $('page-count');
 
     function setStatus(message, error = false) { status.textContent = message; status.className = `status${error ? ' error' : ''}`; }
     function setEditor(open) { editor.classList.toggle('visible', open); dropzone.style.display = open ? 'none' : 'grid'; }
@@ -125,23 +128,37 @@
     }
     function pointerToImage(event) { const r = canvas.getBoundingClientRect(), scale = displayScale(); return { x:(event.clientX-r.left) * canvas.width/r.width/scale, y:(event.clientY-r.top) * canvas.height/r.height/scale }; }
     function closestCorner(point) { let result={ index:0, distance:Infinity }; state.corners.forEach((p,i)=>{ const d=Math.hypot(point.x-p.x,point.y-p.y); if(d<result.distance) result={index:i,distance:d}; }); return result; }
-    function resetImage(message) { state.image=null; state.corners=[]; state.active=null; input.value=''; setEditor(false); setStatus(message || (state.cv ? 'Ready for another photo.' : 'Loading scanner…')); }
+    function updatePageCount() {
+      if (state.editingPage !== null) { pageCount.textContent = `Editing PDF page ${state.editingPage + 1} · ${state.pages.length} ready`; return; }
+      if (state.selected) { const progress = uploadProgress(state.selected, state.batchReady); pageCount.textContent = `${progress.selected} selected · ${progress.ready} ready · ${progress.remaining} to review`; return; }
+      pageCount.textContent = `${state.pages.length} PDF page${state.pages.length === 1 ? '' : 's'} ready`;
+    }
+    function resetImage(message) { state.image=null; state.corners=[]; state.active=null; state.editingPage=null; input.value=''; add.textContent='Add cleaned page'; setEditor(false); updatePageCount(); setStatus(message || (state.cv ? 'Ready for another photo.' : 'Loading scanner…')); }
+    function openImage(source, corners, editingPage = null) {
+      const image = new Image(); image.onload = () => { state.image=image; state.corners=corners ? corners.map(point => ({...point})) : defaultQuad(image.width,image.height,.055); state.editingPage=editingPage; add.textContent=editingPage === null ? 'Add cleaned page' : 'Save crop changes'; setEditor(true); render(); updatePageCount(); setStatus(editingPage === null ? (state.cv ? 'Photo ready. Detecting paper edges…' : 'Photo ready. Drag corners while the scanner loads.') : `Editing crop for PDF page ${editingPage + 1}.`); if (editingPage === null && state.cv) autoDetect(); }; image.src=source;
+    }
     function loadFile(file) {
-      if (!file) return; const reader = new FileReader(); reader.onload = () => { const image = new Image(); image.onload = () => { state.image=image; state.corners=defaultQuad(image.width,image.height,.055); setEditor(true); render(); setStatus(state.cv ? 'Photo ready. Detecting paper edges…' : 'Photo ready. Drag corners while the scanner loads.'); if (state.cv) autoDetect(); }; image.src=reader.result; }; reader.readAsDataURL(file);
+      if (!file) return; const reader = new FileReader(); reader.onload = () => openImage(reader.result); reader.readAsDataURL(file);
     }
     function startNextFile() {
       const file = state.pending.shift();
       if (!file) return false;
-      state.image=null; state.corners=[]; state.active=null; input.value=''; setEditor(false);
+      state.image=null; state.corners=[]; state.active=null; state.editingPage=null; input.value=''; setEditor(false); updatePageCount();
       loadFile(file);
       return true;
     }
     function queueFiles(files) {
       const selected = imageFiles(files);
       if (!selected.length) { setStatus('Please choose one or more image files.', true); return; }
-      state.pending = selected;
+      state.pending = selected; state.selected=selected.length; state.batchReady=0;
       input.value = '';
       startNextFile();
+    }
+    function editPage(index) {
+      if (state.image && state.editingPage === null) { setStatus('Finish or cancel the current photo before editing a saved page.', true); return; }
+      const page = state.pages[index];
+      if (!page) return;
+      openImage(page.source, page.corners, index);
     }
     function autoDetect() {
       if (!state.image || !state.cv) return; setStatus('Finding the document edges…');
@@ -158,13 +175,13 @@
       try { src=cv.imread(state.image); const {width,height}=outputSize(state.image.width,state.image.height); srcTri=cv.matFromArray(4,1,cv.CV_32FC2,state.corners.flatMap(p=>[p.x,p.y])); dstTri=cv.matFromArray(4,1,cv.CV_32FC2,[0,0,width-1,0,width-1,height-1,0,height-1]); M=cv.getPerspectiveTransform(srcTri,dstTri); dst=new cv.Mat(); cv.warpPerspective(src,dst,M,new cv.Size(width,height),cv.INTER_CUBIC,cv.BORDER_REPLICATE,new cv.Scalar()); const out=document.createElement('canvas'); cv.imshow(out,dst); return out.toDataURL('image/jpeg',.93); }
       finally { [src,dst,M,srcTri,dstTri].forEach(m=>m&&m.delete()); }
     }
-    function renderQueue() { const queue=$('queue'); queue.innerHTML=''; if(!state.pages.length) queue.innerHTML='<li class="empty">No pages yet</li>'; state.pages.forEach((page,i)=>{ const li=document.createElement('li'); li.innerHTML=`<img src="${page}" alt="Cleaned page ${i+1}"><span>Page ${i+1}<br><small>cleaned & ready</small></span>`; queue.append(li); }); download.disabled=!state.pages.length; }
+    function renderQueue() { const queue=$('queue'); queue.innerHTML=''; if(!state.pages.length) queue.innerHTML='<li class="empty">No pages yet</li>'; state.pages.forEach((page,i)=>{ const li=document.createElement('li'); li.innerHTML=`<img src="${page.cleaned}" alt="Cleaned page ${i+1}"><span>Page ${i+1}<br><small>cleaned & ready</small></span><button class="edit-page" type="button">Edit crop</button>`; li.querySelector('button').addEventListener('click',()=>editPage(i)); queue.append(li); }); download.disabled=!state.pages.length; updatePageCount(); }
     input.addEventListener('change', e=>queueFiles(e.target.files));
     ['dragenter','dragover'].forEach(event=>dropzone.addEventListener(event,e=>{e.preventDefault();dropzone.classList.add('drag');})); ['dragleave','drop'].forEach(event=>dropzone.addEventListener(event,e=>{e.preventDefault();dropzone.classList.remove('drag');})); dropzone.addEventListener('drop',e=>queueFiles(e.dataTransfer.files));
     canvas.addEventListener('pointerdown',e=>{const hit=closestCorner(pointerToImage(e)); if(hit.distance<90) { state.active=hit.index; canvas.setPointerCapture(e.pointerId); }}); canvas.addEventListener('pointermove',e=>{if(state.active===null)return; state.corners[state.active]=clampPoint(pointerToImage(e),state.image.width,state.image.height); render();}); canvas.addEventListener('pointerup',e=>{state.active=null; canvas.releasePointerCapture?.(e.pointerId);});
-    $('auto-btn').addEventListener('click',autoDetect); $('new-btn').addEventListener('click',()=>{state.pending=[]; resetImage('Choose one or more document photos.');});
-    add.addEventListener('click',()=>{ try { add.disabled=true; setStatus('Cleaning page…'); const page=cropPage(); state.pages.push(page); renderQueue(); if (startNextFile()) setStatus(`Page ${state.pages.length} added. Opening the next photo…`); else resetImage(`Page ${state.pages.length} added to the PDF.`); } catch(error) { console.error(error); setStatus(error.message || 'Could not clean this page.', true); } finally { add.disabled=false; }});
-    download.addEventListener('click',()=>{ try { if(!window.jspdf) throw new Error('PDF generator did not load. Check your internet connection and try again.'); const { jsPDF }=window.jspdf; const pdf=new jsPDF({orientation:'portrait',unit:'px',format:[1200,1697],compress:true}); state.pages.forEach((page,i)=>{if(i)pdf.addPage([1200,1697],'portrait'); pdf.addImage(page,'JPEG',0,0,1200,1697,undefined,'FAST');}); let name=$('filename').value.trim()||'scanned-document.pdf'; if(!name.toLowerCase().endsWith('.pdf')) name += '.pdf'; pdf.save(name); setStatus(`${state.pages.length}-page PDF downloaded.`); } catch(error) { console.error(error); setStatus(error.message || 'Could not create PDF.',true); }});
+    $('auto-btn').addEventListener('click',autoDetect); $('new-btn').addEventListener('click',()=>{state.pending=[]; state.selected=0; state.batchReady=0; resetImage('Choose one or more document photos.');});
+    add.addEventListener('click',()=>{ try { add.disabled=true; setStatus('Cleaning page…'); const cleaned=cropPage(); const page={cleaned, source:state.image.src, corners:state.corners.map(point=>({...point}))}; if (state.editingPage !== null) { const pageNumber=state.editingPage + 1; state.pages[state.editingPage]=page; renderQueue(); resetImage(`Crop updated for PDF page ${pageNumber}.`); } else { state.pages.push(page); state.batchReady+=1; renderQueue(); if (startNextFile()) setStatus(`Page ${state.pages.length} added. Opening the next photo…`); else resetImage(`Page ${state.pages.length} added to the PDF.`); } } catch(error) { console.error(error); setStatus(error.message || 'Could not clean this page.', true); } finally { add.disabled=false; }});
+    download.addEventListener('click',()=>{ try { if(!window.jspdf) throw new Error('PDF generator did not load. Check your internet connection and try again.'); const { jsPDF }=window.jspdf; const pdf=new jsPDF({orientation:'portrait',unit:'px',format:[1200,1697],compress:true}); state.pages.forEach((page,i)=>{if(i)pdf.addPage([1200,1697],'portrait'); pdf.addImage(page.cleaned,'JPEG',0,0,1200,1697,undefined,'FAST');}); let name=$('filename').value.trim()||'scanned-document.pdf'; if(!name.toLowerCase().endsWith('.pdf')) name += '.pdf'; pdf.save(name); setStatus(`${state.pages.length}-page PDF downloaded.`); } catch(error) { console.error(error); setStatus(error.message || 'Could not create PDF.',true); }});
     window.cvReady.then(()=>{state.cv=true; setStatus('Scanner ready. Choose one or more document photos.'); if(state.image)autoDetect();}).catch(()=>setStatus('Scanner could not load. Please refresh and check your internet connection.',true));
   </script>
 </body>

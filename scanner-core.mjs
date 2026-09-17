@@ -27,6 +27,16 @@ export function imageFiles(files) {
   return Array.from(files || []).filter((file) => file?.type?.startsWith('image/'));
 }
 
+export function uploadProgress(selected, ready) {
+  const selectedPages = Math.max(0, Number(selected) || 0);
+  const readyPages = Math.max(0, Number(ready) || 0);
+  return {
+    selected: selectedPages,
+    ready: readyPages,
+    remaining: Math.max(0, selectedPages - readyPages),
+  };
+}
+
 export function outputSize(sourceWidth, sourceHeight) {
   const width = 1200;
   const height = Math.round(width * Math.SQRT2);

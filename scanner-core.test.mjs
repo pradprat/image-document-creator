@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { defaultQuad, imageFiles, orderQuad, outputSize } from './scanner-core.mjs';
+import { defaultQuad, imageFiles, orderQuad, outputSize, uploadProgress } from './scanner-core.mjs';
 
 test('orderQuad returns corners in TL, TR, BR, BL order', () => {
   const corners = orderQuad([
@@ -41,4 +41,9 @@ test('imageFiles keeps all image selections in their original order', () => {
   ]);
 
   assert.deepEqual(selected.map((file) => file.name), ['page-1.jpg', 'page-2.png']);
+});
+
+test('uploadProgress reports selected, ready, and remaining pages', () => {
+  assert.deepEqual(uploadProgress(4, 1), { selected: 4, ready: 1, remaining: 3 });
+  assert.deepEqual(uploadProgress(2, 3), { selected: 2, ready: 3, remaining: 0 });
 });
